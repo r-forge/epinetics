@@ -1,0 +1,13 @@
+Package: epinetics
+Type: Package
+Title: EpiNetics
+Version: 0.1
+Date: 2009-09-16
+Author: Eamon O'Dea
+Maintainer: Eamon O'Dea <ebo@mail.utexas.edu>
+Depends: igraph, network, sna, degreenet
+Suggests: lattice
+Description: More about what it does (maybe more than one line)
+License: GPL (>= 2)
+LazyLoad: yes
+Packaged: 2009-06-12 19:34:51 UTC; eamon

@@ -18,7 +18,7 @@
 #define EVNTREC 2
 
 #define PRINTINFO 0
-#define PRINTINFO2 0
+#define PRINTINFO2 1
 
 /*Structures */
 

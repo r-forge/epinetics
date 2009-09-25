@@ -28,20 +28,27 @@ hashtable_iterator(struct hashtable *h);
 /* hashtable_iterator_key
  * - return the value of the (key,value) pair at the current position */
 
+void * hashtable_iterator_key(struct hashtable_itr *i);
+
+/* replaced with above declaration by Eamon since this appeared to be producing multiple object code on r-forge 
 extern inline void *
-hashtable_iterator_key(struct hashtable_itr *i)
+hashtable_iterator_key(struct hashtable_itr *i);
 {
     return i->e->k;
 }
+*/
 
 /*****************************************************************************/
 /* value - return the value of the (key,value) pair at the current position */
 
+void * hashtable_iterator_value(struct hashtable_itr *i);
+/* replaced with abovie declaration by Eamon since this appeared to be producing multiple object code on r-forge 
 extern inline void *
 hashtable_iterator_value(struct hashtable_itr *i)
 {
     return i->e->v;
 }
+*/
 
 
 /*****************************************************************************/

@@ -18,7 +18,7 @@
 #define EVNTREC (uint16_t) 2
 
 #define PRINTINFO 0
-#define PRINTINFO2 1
+#define PRINTINFO2 0
 
 /*Structures */
 
@@ -199,6 +199,7 @@ epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
 	  step++;
 	  Rprintf ("steps = %2d, total_rates=%f, sim_time=%f\n", step,
 		   total_rates, sim_time);
+          Rprintf("\t %d items in table\n", hashtable_count(h));
 	  do_next_event (INTEGER (make_time_series)[0], distance, fitness);
 	}
     }
@@ -213,10 +214,11 @@ epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   if (step > max)
     {
       Rprintf ("Reached maximum number of steps in max.steps argument.\n");
-      Rprintf
-	("Unfortunately, there is a bug that will cause a seg fault if you run another simulation after reaching max.steps.\n");
-      Rprintf
-	("So save your work, close R, and then restart R before running another simulation.\n");
+    }
+  if (hashtable_count(h))
+    {
+      hashtable_destroy (h, 1);
+      error("Items left in table at end of simulation\n");
     }
   /*Clear protection stack and return */
   UNPROTECT (pc);
@@ -234,8 +236,14 @@ infect (struct key *q, struct value *p)
   SEXP sim_time_p, strain_p, status_p, vall, val, infected_status_p;
   SEXP hood, infector_id_p, sus_status_p, altar_nb_strain_id_p;
   SEXP phylo_id_p;
-  int pc = 0, i, altar_nb_id, distance, altar_id;
+  int pc = 0, i, altar_nb_id, distance, altar_id, strain_id, phylo_id;
   double tau, rate;
+
+  /*Assignments to help avoid excessive pointer confusion
+   * and simply some lines of code */
+  strain_id = p->strain_id;
+  phylo_id = p->phylo_id;
+  altar_id = q->altar_id;
 
   /*Add vertex attributes */
   PROTECT (sim_time_p = allocVector (REALSXP, 1));
@@ -252,15 +260,15 @@ infect (struct key *q, struct value *p)
   pc++;
   REAL (sim_time_p)[0] = sim_time;
   INTEGER (infector_id_p)[0] = q->ego_id;
-  INTEGER (strain_p)[0] = p->strain_id;
-  INTEGER (phylo_id_p)[0] = p->phylo_id;
+  INTEGER (strain_p)[0] = strain_id;
+  INTEGER (phylo_id_p)[0] = phylo_id;
   SET_STRING_ELT (infected_status_p, 0, mkChar ("infectious"));
   SET_STRING_ELT (sus_status_p, 0, mkChar ("susceptible"));
-  g = netSetVertexAttrib (g, "time_infected", sim_time_p, q->altar_id);
-  g = netSetVertexAttrib (g, "infection_history", strain_p, q->altar_id);
-  g = netSetVertexAttrib (g, "status", infected_status_p, q->altar_id);
-  g = netSetVertexAttrib (g, "infector_id", infector_id_p, q->altar_id);
-  g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, q->altar_id);
+  g = netSetVertexAttrib (g, "time_infected", sim_time_p, altar_id);
+  g = netSetVertexAttrib (g, "infection_history", strain_p, altar_id);
+  g = netSetVertexAttrib (g, "status", infected_status_p, altar_id);
+  g = netSetVertexAttrib (g, "infector_id", infector_id_p, altar_id);
+  g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, altar_id);
 
   /*update case load counter */
   case_load++;
@@ -273,7 +281,7 @@ infect (struct key *q, struct value *p)
       error ("%s: %d: Ran out of memory allocating a key\n",
 	     __FILE__, __LINE__);
     }
-  k->ego_id = q->altar_id;
+  k->ego_id = altar_id;
   k->altar_id = 0;
   k->function_id = EVNTMUT;
   k->two_port = 0;
@@ -303,7 +311,7 @@ infect (struct key *q, struct value *p)
       error ("%s: %d: Ran out of memory allocating a key\n",
 	     __FILE__, __LINE__);
     }
-  k->ego_id = q->altar_id;
+  k->ego_id = altar_id;
   k->altar_id = 0;
   k->function_id = EVNTREC;
   k->two_port = 0;
@@ -327,7 +335,7 @@ infect (struct key *q, struct value *p)
     }
 
   /* Add event of infected host infecting suceptible neighbors */
-  PROTECT (hood = netGetNeighborhood (g, q->altar_id, "out", 1));
+  PROTECT (hood = netGetNeighborhood (g, altar_id, "out", 1));
   pc++;
   PROTECT (val = getListElement (g, "val"));
   pc++;
@@ -346,7 +354,7 @@ infect (struct key *q, struct value *p)
 	      error ("%s: %d: Ran out of memory allocating a key\n",
 		     __FILE__, __LINE__);
 	    }
-	  k->ego_id = q->altar_id;
+	  k->ego_id = altar_id;
 	  k->altar_id = altar_nb_id;
 	  k->function_id = EVNTINF;
 	  k->two_port = 0;
@@ -359,8 +367,12 @@ infect (struct key *q, struct value *p)
 	      error ("%s: %d: Ran out of memory allocating a key\n",
 		     __FILE__, __LINE__);
 	    }
-	  v->strain_id = p->strain_id;
-	  v->phylo_id = p->phylo_id;
+		v->strain_id = strain_id;
+		v->phylo_id = phylo_id;
+/*This does strange things for some reason, so assign RHS to ints above
+ * v->strain_id = p->strain_id;
+ *	  	  v->phylo_id = p->phylo_id;
+ */
 	  PROTECT (vall =
 		   getListElement (VECTOR_ELT (val, altar_nb_id - 1),
 				   "immune_memory"));
@@ -400,7 +412,7 @@ infect (struct key *q, struct value *p)
 	{
 	  k->function_id = EVNTINF;
 	  k->ego_id = altar_nb_id;
-	  k->altar_id = q->altar_id;
+	  k->altar_id = altar_id;
           k->two_port = 0;
 	  if (NULL == (found = remove_some (h, k)))
 	    {
@@ -432,9 +444,12 @@ mutate (struct key *q, struct value *p)
   SEXP new_mutation_times_vector_p;
   SEXP old_phylo_id_vector_p;
   SEXP new_phylo_id_vector_p;
-  int pc = 0, i, ego_nb_id, Rc_int = 0, new_strain_id;
+  int pc = 0, i, ego_id, ego_nb_id, Rc_int = 0, new_strain_id;
   int new_phylo_id;
   double distance, tau, rate;
+
+  /*Assignments to help avoid pointer confusion*/
+  ego_id = q->ego_id;
 
   /*Add and update vertex attributes */
   PROTECT (sim_time_p = allocVector (REALSXP, 1));
@@ -503,7 +518,7 @@ mutate (struct key *q, struct value *p)
 	      error ("%s: %d: Ran out of memory allocating a key\n",
 		     __FILE__, __LINE__);
 	    }
-	  k->ego_id = q->ego_id;
+	  k->ego_id = ego_id;
 	  k->altar_id = ego_nb_id;
 	  k->function_id = EVNTINF;
 	  k->two_port = 0;
@@ -665,11 +680,14 @@ recover (struct key *q, struct value *p)
 void
 simulator_free (void)
 {
-  if (h)
+/* the if (h) does not avoid double freeing hash tables, so I'll just turn this 
+ * off until I figure out the right way to do it
+  	if (h)
     {
       Rprintf("At termination, %d items in table\n", hashtable_count(h));
       hashtable_destroy (h, 1);
     }
+    */
 }
 
 void

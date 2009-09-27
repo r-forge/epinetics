@@ -21,9 +21,9 @@ struct key
 struct value
 {
   double rate;
-  int function_id;
-  int ego_id;
-  int altar_id;
+  uint16_t function_id;
+  uint32_t ego_id;
+  uint32_t altar_id;
   int strain_id;
   int phylo_id;
 };

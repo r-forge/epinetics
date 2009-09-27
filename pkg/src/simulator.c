@@ -13,9 +13,9 @@
 
 #define MAXINDEX 100
 
-#define EVNTMUT 0
-#define EVNTINF 1
-#define EVNTREC 2
+#define EVNTMUT (uint16_t) 0
+#define EVNTINF (uint16_t) 1
+#define EVNTREC (uint16_t) 2
 
 #define PRINTINFO 0
 #define PRINTINFO2 1

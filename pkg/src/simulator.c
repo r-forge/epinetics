@@ -225,6 +225,174 @@ epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   return g;
 }
 
+SEXP
+seq_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
+	     SEXP mutation_rate, SEXP max_steps, SEXP verbose,
+	     SEXP immune_decay, SEXP make_time_series,
+	     SEXP initial_infectious_id, SEXP prop_mutant)
+     /*
+      * This function is the main loop for a Gillespie's direct 
+      * method stochastic simulation of a SIR model with mutation.
+      */
+{
+  struct key *k;
+  int num_nodes, step, max, pc = 0, init_id, i;
+  double tolerance = 0.001, rand, prop;
+  double *distance, *fitness;
+
+  /* reset global variables (mainly time) for secondary runs */
+  struct event *start = NULL;	// Pointer to first element in doubly-linked list
+  struct event *last = NULL;	// Pointer to last element in doubly-linked list
+  sim_time = 0;			// Simulation time
+  a = 0;			//instantaneous rate of decay of sim_T with distance between new and old strains
+  total_rates = 0;		//sum of rate of all events possible at simulation time TIME 
+  case_load = 0;
+  next_phylo_id = 1;
+
+  h = create_hashtable (16, hashfromkey, equalkeys);
+  if (NULL == h)
+    {
+      error ("%s:%d: Unable to create hash table\n", __FILE__, __LINE__);
+    }
+  /*Verify that we were called properly */
+  netRegisterFunctions ();
+  g = network;
+  if (!netIsNetwork (g))
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with a network object\n", __FILE__, __LINE__);
+    }
+  if (netIsDir (g))
+    {
+      error ("%s:%d: epiSimSSA_R must be \
+ called with an undirected network\n", __FILE__, __LINE__);
+    }
+  PROTECT (trans = coerceVector (trans, REALSXP));
+  pc++;
+  PROTECT (infectious_period = coerceVector (infectious_period, REALSXP));
+  pc++;
+  PROTECT (mutation_rate = coerceVector (mutation_rate, REALSXP));
+  pc++;
+  PROTECT (max_steps = coerceVector (max_steps, INTSXP));
+  pc++;
+  PROTECT (immune_decay = coerceVector (immune_decay, REALSXP));
+  pc++;
+
+  /*Store simulation parameters as network attributes for later reference */
+  sim_T = REAL (trans)[0];
+  if (sim_T > 0.99)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with trans in [0,0.99]\n", __FILE__, __LINE__);
+    }
+  sim_mu = REAL (mutation_rate)[0];
+  if (sim_mu < 0 || sim_mu > 1000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with mutation rate in [0, 1000]\n", __FILE__, __LINE__);
+    }
+  sim_gamma = 1 / REAL (infectious_period)[0];
+  if (sim_gamma <= 0.001 || sim_gamma > 1000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with a mean infectious period in  [0.001, 1000]\n", __FILE__, __LINE__);
+    }
+  a = REAL (immune_decay)[0];
+  if (a < 0 || a > 1000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with immune_decay in  [0, 1000]\n", __FILE__, __LINE__);
+    }
+  max = INTEGER (max_steps)[0];
+
+  if (max < 0 || max > 1000000000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with max.steps in  [0, 1e9]\n", __FILE__, __LINE__);
+    }
+  sim_beta = -sim_T / ((1 / sim_gamma) * (sim_T - 1));
+
+  g = netSetNetAttrib (g, "transmissability", trans);
+  g = netSetNetAttrib (g, "mutation_rate", mutation_rate);
+  g = netSetNetAttrib (g, "infectious_period", infectious_period);
+  g = netSetNetAttrib (g, "immune_decay", immune_decay);
+
+  /*Setup random number generator */
+  GetRNGstate ();
+  
+  k = (struct key *) malloc (sizeof (struct key));
+  if (NULL == k)
+    {
+      hashtable_destroy (h, 1);
+      error ("%s: %d: Ran out of memory allocating a key\n",
+	     __FILE__, __LINE__);
+    }
+
+  v = (struct value *) malloc (sizeof (struct value));
+  if (NULL == v)
+    {
+      hashtable_destroy (h, 1);
+      error ("%s: %d: Ran out of memory allocating a key\n",
+	     __FILE__, __LINE__);
+      free (k);
+    }
+
+  init_id = INTEGER (initial_infectious_id)[0];
+  prop = REAL (prop_mutant)[0];
+  for (i = init_id; i < prop*(init_id + 10); i++){
+      k->ego_id = 0;
+      k->altar_id = i;
+      v->strain_id = 53;
+      v->phylo_id = next_phylo_id;
+      next_phylo_id++;
+      infect (k, v);
+  }
+  for (; i < init_id + 10; i++){
+      k->ego_id = 0;
+      k->altar_id = i;
+      v->strain_id = 0;
+      v->phylo_id = next_phylo_id;
+      next_phylo_id++;
+      infect (k, v);
+  }
+
+
+
+  step = 0;
+
+  if (INTEGER (verbose)[0])
+    {
+      while (step <= max && total_rates >= tolerance)
+	{
+	  step++;
+	  Rprintf ("steps = %2d, total_rates=%f, sim_time=%f\n", step,
+		   total_rates, sim_time);
+          Rprintf("\t %d items in table\n", hashtable_count(h));
+	  do_next_event (INTEGER (make_time_series)[0], distance, fitness);
+	}
+    }
+  else
+    {
+      while (step <= max && total_rates >= tolerance)
+	{
+	  step++;
+	  do_next_event (INTEGER (make_time_series)[0], distance, fitness);
+	}
+    }
+  if (step > max)
+    {
+      Rprintf ("Reached maximum number of steps in max.steps argument.\n");
+    }
+  if (hashtable_count(h))
+    {
+      hashtable_destroy (h, 1);
+      error("Items left in table at end of simulation\n");
+    }
+  /*Clear protection stack and return */
+  UNPROTECT (pc);
+  return g;
+}
+
 
 int
 infect (struct key *q, struct value *p)

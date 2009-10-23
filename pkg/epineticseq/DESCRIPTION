@@ -1,13 +1,13 @@
-Package: epinetics
+Package: epineticseq
 Type: Package
-Title: EpiNetics
-Version: 0.2
-Date: 2009-09-16
+Title: EpiNeticSeq
+Version: 0.1
+Date: 2009-10-21
 Author: Eamon O'Dea
 Maintainer: Eamon O'Dea <ebo@mail.utexas.edu>
 Depends: igraph, network, sna, degreenet
 Suggests: lattice
-Description: More about what it does (maybe more than one line)
+Description: Simulate evolution of viral sequences alongth with population dynamics
 License: GPL (>= 2)
 LazyLoad: yes
 Packaged: 2009-06-12 19:34:51 UTC; eamon

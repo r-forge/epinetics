@@ -1,8 +1,8 @@
-.packageName <- 'epinetics'
+.packageName <- 'epineticseq'
 
 .First.lib <-
  function (lib.loc, pkg){
-    library.dynam('epinetics', pkg, lib.loc)
+    library.dynam('epineticseq', pkg, lib.loc)
     
     require(sna);
     require(degreenet);
@@ -11,7 +11,7 @@
 
 .Last.lib <-
  function (lib.loc, pkg){
-  library.dynam.unload('epinetics', pkg, lib.loc)
+  library.dynam.unload('epineticseq', pkg, lib.loc)
     
   pos <- match ("package::sna", search())
   if (!is.na(pos)){

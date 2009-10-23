@@ -1108,7 +1108,7 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
       error ("%s: %d: MAXIMMUN is not large enough to track all adaptive immunity levels\n");
     }
 
-  infect (k, v);
+  winfect (k, v);
 
 
   step = 0;
@@ -1226,7 +1226,6 @@ within_do_next_event (int make_time_series, double *distance, double *fitness)
 #if PRINTINFO2
       Rprintf ("Mutation of strain in %d\n", k->ego_id);
 #endif
-      wmutate_infect (k, v);
       break;
     case EVNTREC:
 #if PRINTINFO2
@@ -1253,7 +1252,7 @@ winfect (struct key *q, struct value *p)
   SEXP sim_time_p, strain_p, status_p, vall, val, infected_status_p;
   SEXP hood, infector_id_p, sus_status_p, altar_nb_strain_id_p;
   SEXP phylo_id_p;
-  int pc = 0, i, altar_nb_id, distance, altar_id, strain_id, phylo_id;
+  int pc = 0, i, altar_nb_id, distance, altar_id, strain_id, phylo_id, two_port;
   double tau, rate;
 
   /*Assignments to help avoid excessive pointer confusion
@@ -1261,6 +1260,7 @@ winfect (struct key *q, struct value *p)
   strain_id = p->strain_id;
   phylo_id = p->phylo_id;
   altar_id = q->altar_id;
+  two_port = q->two_port;
 
   /*Add vertex attributes */
   PROTECT (sim_time_p = allocVector (REALSXP, 1));
@@ -1287,43 +1287,29 @@ winfect (struct key *q, struct value *p)
   g = netSetVertexAttrib (g, "infector_id", infector_id_p, altar_id);
   g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, altar_id);
 
-  /*update case load counter */
-  Rprintf("case load: %d, imm level: %d \n", case_load, adaptive_immunity_levels[phylo_id]);
-  case_load++;
-  adaptive_immunity_levels[phylo_id]++;
   if (phylo_id > MAXIMMUN)
     {
       error("%s: %d: MAXIMMUN is not larger than phylo_id\n");
     }
-  /*Add event of strain mutating to the table */
-  k = (struct key *) malloc (sizeof (struct key));
-  if (NULL == k)
-    {
-      hashtable_destroy (h, 1);
-      error ("%s: %d: Ran out of memory allocating a key\n",
-	     __FILE__, __LINE__);
-    }
-  k->ego_id = altar_id;
-  k->altar_id = 0;
-  k->function_id = EVNTMUT;
-  k->two_port = 0;
 
-  v = (struct value *) malloc (sizeof (struct value));
-  if (NULL == v)
+  /*Mutate if specified*/
+  if (two_port == 1)
     {
-      hashtable_destroy (h, 1);
-      error ("%s: %d: Ran out of memory allocating a key\n",
-	     __FILE__, __LINE__);
-      free(k);
+      phylo_id = next_phylo_id;
+      INTEGER (phylo_id_p)[0] = phylo_id;
+      next_phylo_id++;
+      g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, altar_id);
+      INTEGER (strain_p)[0] = ++strain_id;
+      g = netSetVertexAttrib (g, "infection_history", strain_p, altar_id);
     }
-  v->rate = sim_mu;
-  total_rates += v->rate;
-  if (!insert_some (h, k, v))
-    {
-      hashtable_destroy (h, 1);
-      free (k);
-      error ("%s:%d: Insertion into hash table failed\n", __FILE__, __LINE__);
-    }
+   else
+     {
+       g = netSetVertexAttrib (g, "infection_history", strain_p, altar_id);
+       g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, altar_id);
+     }
+  /*update case load counter */
+  case_load++;
+  adaptive_immunity_levels[next_phylo_id]++;
 
   /*Add event of host recovering to the table */
   k = (struct key *) malloc (sizeof (struct key));
@@ -1355,8 +1341,9 @@ winfect (struct key *q, struct value *p)
       free (k);
       error ("%s:%d: Insertion into hash table failed\n", __FILE__, __LINE__);
     }
+  
 
-  /* Add event of infected host infecting suceptible neighbors */
+  /* Add event of infected host infecting susceptible neighbor cells */
   PROTECT (hood = netGetNeighborhood (g, altar_id, "out", 1));
   pc++;
   PROTECT (val = getListElement (g, "val"));
@@ -1414,7 +1401,64 @@ winfect (struct key *q, struct value *p)
 	    }
 	}
     }
-  /* Remove event of infected host geting infected by infectious neighbors */
+  
+  /* Add event of infected host infecting susceptible neighbor cells with a mutant*/
+  for (i = 0; i < length (hood); i++)
+    {
+
+      altar_nb_id = INTEGER (hood)[i];
+      PROTECT (vall =
+	       getListElement (VECTOR_ELT (val, altar_nb_id - 1), "status"));
+      pc++;
+     if (vecEq (vall, sus_status_p))
+	{
+	  k = (struct key *) malloc (sizeof (struct key));
+	  if (NULL == k)
+	    {
+	      hashtable_destroy (h, 1);
+	      error ("%s: %d: Ran out of memory allocating a key\n",
+		     __FILE__, __LINE__);
+	    }
+	  k->ego_id = altar_id;
+	  k->altar_id = altar_nb_id;
+	  k->function_id = EVNTINF;
+	  k->two_port = 1;
+
+	  v = (struct value *) malloc (sizeof (struct value));
+	  if (NULL == v)
+	    {
+	      hashtable_destroy (h, 1);
+              free (k);
+	      error ("%s: %d: Ran out of memory allocating a key\n",
+		     __FILE__, __LINE__);
+	    }
+		v->strain_id = strain_id;
+		v->phylo_id = phylo_id;
+/*This does strange things for some reason, so assign RHS to ints above
+ * v->strain_id = p->strain_id;
+ *	  	  v->phylo_id = p->phylo_id;
+ */
+	  PROTECT (vall =
+		   getListElement (VECTOR_ELT (val, altar_nb_id - 1),
+				   "immune_memory"));
+	  pc++;
+	  distance = p->strain_id + fabs (INTEGER (vall)[0]);
+	  tau = exp (-a * distance);
+	  rate = sim_beta * (1 - tau) * sim_mu;
+	  v->rate = rate;
+	  total_rates += v->rate;
+
+	  if (!insert_some (h, k, v))
+	    {
+	      hashtable_destroy (h, 1);
+              free (k);
+	      error ("%s:%d: Insertion into hash table failed\n", __FILE__,
+		     __LINE__);
+	    }
+	}
+    }
+
+  /* Remove event of infected host geting infected by infectious neighbors, either with or without a mutant */
   /* For some reason, doing this before adding the infection events switches
    * the ego_id in q, so it is done last*/
   for (i = 0; i < length (hood); i++)
@@ -1445,137 +1489,25 @@ winfect (struct key *q, struct value *p)
 	    }
           total_rates -= found->rate;
           free(found);
+	  
+          k->function_id = EVNTINF;
+	  k->ego_id = altar_nb_id;
+	  k->altar_id = altar_id;
+          k->two_port = 1;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+	      free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free(found);
 	}
     }
   UNPROTECT (pc);
   return (0);
 }
-
-int
-wmutate_infect (struct key *q, struct value *p)
-{
-  /* cell EGO_ID buds off a particle with a mutation that infects another cell time at SIM_TIME */
-
-  struct key *k;
-  SEXP sim_time_p, vall, val;
-  SEXP hood, sus_status_p;
-  SEXP strain_id_p;
-  SEXP new_phylo_id_p;
-  SEXP old_mutation_times_vector_p;
-  SEXP new_mutation_times_vector_p;
-  SEXP old_phylo_id_vector_p;
-  SEXP new_phylo_id_vector_p;
-  int pc = 0, i, ego_id, ego_nb_id, Rc_int = 0, new_strain_id;
-  int new_phylo_id;
-  double distance, tau, rate;
-
-  /*Assignments to help avoid pointer confusion*/
-  ego_id = q->ego_id;
-
-  /*Add and update vertex attributes */
-  PROTECT (sim_time_p = allocVector (REALSXP, 1));
-  pc++;
-  PROTECT (sus_status_p = allocVector (STRSXP, 1));
-  pc++;
-  REAL (sim_time_p)[0] = sim_time;
-  SET_STRING_ELT (sus_status_p, 0, mkChar ("susceptible"));
-
-
-  PROTECT (val = getListElement (g, "val"));
-  pc++;				//get list of vertex attributes
-
-  PROTECT (old_mutation_times_vector_p =
-	   getListElement (VECTOR_ELT (val, q->ego_id - 1), "time_mutated"));
-  pc++;
-  PROTECT (new_mutation_times_vector_p =
-	   vecAppend (old_mutation_times_vector_p, sim_time_p));
-  pc++;
-
-  g =
-    netSetVertexAttrib (g, "time_mutated", new_mutation_times_vector_p,
-			q->ego_id);
-
-  PROTECT (old_phylo_id_vector_p =
-	   getListElement (VECTOR_ELT (val, q->ego_id - 1), "phylo_id"));
-  pc++;
-  new_phylo_id = next_phylo_id;
-  next_phylo_id++;
-  PROTECT (new_phylo_id_p = allocVector (INTSXP, 1));
-  pc++;
-  INTEGER (new_phylo_id_p)[0] = new_phylo_id;
-  PROTECT (new_phylo_id_vector_p =
-	   vecAppend (old_phylo_id_vector_p, new_phylo_id_p));
-  pc++;
-
-  g = netSetVertexAttrib (g, "phylo_id", new_phylo_id_vector_p, q->ego_id);
-
-  PROTECT (strain_id_p =
-	   getListElement (VECTOR_ELT (val, q->ego_id - 1),
-			   "infection_history"));
-  pc++;
-  new_strain_id = INTEGER (strain_id_p)[0] + 1;
-  INTEGER (strain_id_p)[0] = new_strain_id;
-  g = netSetVertexAttrib (g, "infection_history", strain_id_p, q->ego_id);
-
-
-  /* Update the rate and strain_id elements for the events of this newly
-   * mutated strain spreading from EGO_ID */
-
-  PROTECT (hood = netGetNeighborhood (g, q->ego_id, "out", 1));
-  pc++;
-  for (i = 0; i < length (hood); i++)
-    {
-      ego_nb_id = INTEGER (hood)[i];
-      PROTECT (vall =
-	       getListElement (VECTOR_ELT (val, ego_nb_id - 1), "status"));
-      pc++;
-
-      if (vecEq (vall, sus_status_p))
-	{
-	  k = (struct key *) malloc (sizeof (struct key));
-	  if (NULL == k)
-	    {
-	      hashtable_destroy (h, 1);
-	      error ("%s: %d: Ran out of memory allocating a key\n",
-		     __FILE__, __LINE__);
-	    }
-	  k->ego_id = ego_id;
-	  k->altar_id = ego_nb_id;
-	  k->function_id = EVNTINF;
-	  k->two_port = 0;
-
-        if (NULL == (v = search_some(h,k))) {
-	      error ("%s:%d: Search for key in hash table failed\n", __FILE__,
-		     __LINE__);
-        }
-	  v->strain_id = new_strain_id;
-	  v->phylo_id = new_phylo_id;
-
-          /* update the rate */
-	  PROTECT (vall =
-		   getListElement (VECTOR_ELT (val, ego_nb_id - 1),
-				   "immune_memory"));
-	  pc++;
-	  distance = new_strain_id + fabs (INTEGER (vall)[0]);
-	  tau = exp (-a * distance);
-	  rate = sim_beta * (1 - tau);
-          total_rates -= v->rate;
-	  v->rate = rate;
-	  total_rates += rate;
-
-/*	  if (!hashtable_change (h, k, v))
-	    {
-	      hashtable_destroy (h, 1);
-              free (k);
-	      error ("%s:%d: Modification of key in hash table failed\n", __FILE__,
-		     __LINE__);
-	    }*/
-       }
-    }
-  UNPROTECT (pc);
-  return (0);
-}
-
 
 int
 wrecover (struct key *q, struct value *p)
@@ -1631,30 +1563,7 @@ wrecover (struct key *q, struct value *p)
           total_rates -= found->rate;
           free (found);
 
-          /*Remove event of strain mutating to the events array and doubly linked list */
-	  k = (struct key *) malloc (sizeof (struct key));
-          if (NULL == k)
-            {
-              hashtable_destroy (h, 1);
-              error ("%s: %d: Ran out of memory allocating a key\n",
-                     __FILE__, __LINE__);
-            }
-	  k->ego_id = ego_id;
-	  k->altar_id = 0;
-	  k->function_id = EVNTMUT;
-          k->two_port = 0;
-	  if (NULL == (found = remove_some (h, k)))
-	    {
-	      hashtable_destroy (h, 1);
-              free (k);
-	      error ("%s:%d: Key not found for removal\n",
-		     __FILE__, __LINE__);
-	    }
-
-          total_rates -= found->rate;
-          free (found);
-
-          /* Remove event of newly recovered host infecting suceptible neighbors from pointer array and dl list */
+  /* Remove event of newly recovered host infecting suceptible neighbors from pointer array and dl list */
   PROTECT (hood = netGetNeighborhood (g, ego_id, "out", 1));
   pc++;
   PROTECT (val = getListElement (g, "val"));
@@ -1682,6 +1591,27 @@ wrecover (struct key *q, struct value *p)
 	  k->altar_id = ego_nb_id;
 	  k->function_id = EVNTINF;
           k->two_port = 0;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+              free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
+	  
+          k = (struct key *) malloc (sizeof (struct key));
+          if (NULL == k)
+            {
+              hashtable_destroy (h, 1);
+              error ("%s: %d: Ran out of memory allocating a key\n",
+                     __FILE__, __LINE__);
+            }
+	  k->ego_id = ego_id;
+	  k->altar_id = ego_nb_id;
+	  k->function_id = EVNTINF;
+          k->two_port = 1;
 	  if (NULL == (found = remove_some (h, k)))
 	    {
 	      hashtable_destroy (h, 1);

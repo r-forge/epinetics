@@ -1101,13 +1101,6 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   k->altar_id = INTEGER (initial_infectious_id)[0];
   v->strain_id = 0;
   v->phylo_id = next_phylo_id;
-  adaptive_immunity_levels[next_phylo_id]++;
-  next_phylo_id++;
-  if (next_phylo_id > MAXIMMUN)
-    {
-      error ("%s: %d: MAXIMMUN is not large enough to track all adaptive immunity levels\n");
-    }
-
   winfect (k, v);
 
 
@@ -1159,25 +1152,7 @@ within_do_next_event (int make_time_series, double *distance, double *fitness)
   double fitness_sum, distance_sum, dist_by_fit_sum;
   double dist_fit_cov;
   struct key *k;
-
-  SEXP old_time_series_vector_p;
-  SEXP new_time_series_vector_p;
-  SEXP old_covariance_series_vector_p;
-  SEXP new_covariance_series_vector_p;
-  SEXP old_case_series_vector_p;
-  SEXP new_case_series_vector_p;
-  SEXP old_fitness_sum_series_vector_p;
-  SEXP new_fitness_sum_series_vector_p;
-  SEXP old_mean_distance_series_vector_p;
-  SEXP new_mean_distance_series_vector_p;
-  SEXP sim_time_p;
-  SEXP cov_p;
-  SEXP case_p;
-  SEXP fitness_p;
-  SEXP distance_p;
   
-  SEXP old_adaptive_imm_series_vector_p;
-  SEXP new_adaptive_imm_series_vector_p;
   
   int num_infectious_crit = make_time_series;
   rand_one = runif (0.0, 1.0);
@@ -1307,9 +1282,10 @@ winfect (struct key *q, struct value *p)
        g = netSetVertexAttrib (g, "infection_history", strain_p, altar_id);
        g = netSetVertexAttrib (g, "phylo_id", phylo_id_p, altar_id);
      }
+  
   /*update case load counter */
   case_load++;
-  adaptive_immunity_levels[next_phylo_id]++;
+  adaptive_immunity_levels[phylo_id]++;
 
   /*Add event of host recovering to the table */
   k = (struct key *) malloc (sizeof (struct key));

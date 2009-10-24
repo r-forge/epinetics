@@ -51,7 +51,8 @@ SEXP g;				//pointer to network object
 int case_load = -1;		//counts the number of current infected hosts
 double adaptive_immunity_levels[MAXIMMUN]= {0};     //counts of specific immune responses to strains with different phylo_ids
 int next_phylo_id = 1;		//next strain phylogenetic id number, as opposed to the normal id that's based on distance
-double conv = 0.1;              //Conversion factor for the stimulation of immunity
+double efficiency = 0.1;        //Instantaneous rate by which each immune predator eats infected prey
+double conversion_factor = 0.1; //Each infectious prey consumed by the immune pred is converted into this many new immune preds
 
 struct value *v, *found;
 struct hashtable *h;
@@ -66,7 +67,7 @@ SEXP epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
 SEXP within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
 		  SEXP mutation_rate, SEXP max_steps, SEXP verbose,
 		  SEXP immune_decay, SEXP make_time_series,
-		  SEXP initial_infectious_id);
+		  SEXP initial_infectious_id, SEXP eff, SEXP conv_fac, SEXP innoc_size);
 //the functions that gets called from R
 
 int infect (struct key *q, struct value *p);
@@ -987,14 +988,14 @@ SEXP
 within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
 	     SEXP mutation_rate, SEXP max_steps, SEXP verbose,
 	     SEXP immune_decay, SEXP make_time_series,
-	     SEXP initial_infectious_id)
+	     SEXP initial_infectious_id, SEXP eff, SEXP conv_fac, SEXP innoc_size)
      /*
       * This function is the main loop for a Gillespie's direct 
       * method stochastic simulation of a within-host infection model with mutation.
       */
 {
   struct key *k;
-  int num_nodes, step, max, pc = 0, i;
+  int num_nodes, step, max, pc = 0, i, init_id;
   double tolerance = 0.001, rand;
   double *distance, *fitness;
   SEXP imm_levels_p;
@@ -1042,6 +1043,12 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   pc++;
   PROTECT (immune_decay = coerceVector (immune_decay, REALSXP));
   pc++;
+  PROTECT (eff = coerceVector (eff, REALSXP));
+  pc++;
+  PROTECT (conv_fac = coerceVector (conv_fac, REALSXP));
+  pc++;
+  PROTECT (innoc_size = coerceVector (innoc_size, INTSXP));
+  pc++;
 
   /*Store simulation parameters as network attributes for later reference */
   sim_T = REAL (trans)[0];
@@ -1077,11 +1084,28 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
     }
   sim_beta = -sim_T / ((1 / sim_gamma) * (sim_T - 1));
 
+  efficiency = REAL(eff)[0];
+  if (efficiency < 0 || efficiency > 1000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with efficiency in [0, 1000]\n", __FILE__, __LINE__);
+    }
+  
+  conversion_factor = REAL(conv_fac)[0];
+  if (conversion_factor < 0 || conversion_factor > 1000)
+    {
+      error ("%s:%d: epiSimSSA_R must be\
+ called with conversion_factor in [0, 1000]\n", __FILE__, __LINE__);
+    }
+
+
   g = netSetNetAttrib (g, "transmissability", trans);
   g = netSetNetAttrib (g, "mutation_rate", mutation_rate);
   g = netSetNetAttrib (g, "infectious_period", infectious_period);
   g = netSetNetAttrib (g, "immune_decay", immune_decay);
-
+  g = netSetNetAttrib (g, "efficiency", eff);
+  g = netSetNetAttrib (g, "conversion_factor", conv_fac);
+ 
   /*Setup random number generator */
   GetRNGstate ();
   
@@ -1101,12 +1125,16 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
 	     __FILE__, __LINE__);
       free (k);
     }
-  k->ego_id = 0;
-  k->altar_id = INTEGER (initial_infectious_id)[0];
-  v->strain_id = 0;
-  v->phylo_id = next_phylo_id;
-  winfect (k, v);
 
+  init_id = INTEGER (initial_infectious_id)[0];
+  for (i = init_id; i < init_id + INTEGER(innoc_size)[0]; i++){
+      k->ego_id = 0;
+      k->altar_id = i;
+      v->strain_id = 0;
+      v->phylo_id = next_phylo_id;
+      winfect (k, v);
+  }
+  next_phylo_id++;
 
   step = 0;
 
@@ -1329,7 +1357,8 @@ winfect (struct key *q, struct value *p)
 	     __FILE__, __LINE__);
     }
   v->phylo_id = phylo_id;
-  v->rate = conv * adaptive_immunity_levels[phylo_id];
+  v->rate = efficiency * adaptive_immunity_levels[phylo_id];
+  Rprintf("stim rate: %g \n", v->rate);
   total_rates += v->rate;
 
   if (!insert_some (h, k, v))
@@ -1550,7 +1579,8 @@ wimmstim (struct key *q, struct value *p)
 
   ego_id = q->ego_id;
   phylo_id = p->phylo_id;
-  Rprintf("%d, %g\n", phylo_id,  adaptive_immunity_levels[phylo_id]++);
+  adaptive_immunity_levels[phylo_id] += conversion_factor;
+  Rprintf("adaptive_immunity_levels[%d] = %g\n", phylo_id, adaptive_immunity_levels[phylo_id]);
 
   /*Increase the immune stimulation rates with new level of immunity */
   n = netNetSize(g);
@@ -1569,9 +1599,8 @@ wimmstim (struct key *q, struct value *p)
        if (NULL != (found = search_some(h,k))) {
            if (found->phylo_id == phylo_id){
                total_rates -= found->rate;
-               found->rate = adaptive_immunity_levels[phylo_id] * conv;
+               found->rate = adaptive_immunity_levels[phylo_id] * efficiency;
                total_rates += found->rate;
-                 Rprintf("id: %d, rate: %g\n", phylo_id, found->rate);
            }
        }
      }

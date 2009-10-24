@@ -1545,14 +1545,36 @@ wimmstim (struct key *q, struct value *p)
   SEXP sim_time_p, status_p, vall, val, infected_status_p;
   SEXP hood, infector_id_p, sus_status_p, rec_status_p;
   SEXP strain_id_p;
-  int pc = 0, i, ego_nb_id, ego_id, phylo_id;
+  int pc = 0, i, ego_nb_id, ego_id, phylo_id, n;
   struct key *k;
 
   ego_id = q->ego_id;
   phylo_id = p->phylo_id;
-  Rprintf("%d, %g\n",phylo_id,  adaptive_immunity_levels[phylo_id]++);
+  Rprintf("%d, %g\n", phylo_id,  adaptive_immunity_levels[phylo_id]++);
 
   /*Increase the immune stimulation rates with new level of immunity */
+  n = netNetSize(g);
+  k = (struct key *)malloc(sizeof(struct key));
+      if (NULL == k) {
+          printf("ran out of memory allocating a key\n");
+          return 1;
+      }  
+   for (i = 1; i <= n; i++)
+     {
+       k->ego_id = i;
+       k->altar_id = 0;
+       k->function_id = WIMMSTIM;
+       k->two_port = 0;
+
+       if (NULL != (found = search_some(h,k))) {
+           if (found->phylo_id == phylo_id){
+               total_rates -= found->rate;
+               found->rate = adaptive_immunity_levels[phylo_id] * conv;
+               total_rates += found->rate;
+                 Rprintf("id: %d, rate: %g\n", phylo_id, found->rate);
+           }
+       }
+     }
 
 
 

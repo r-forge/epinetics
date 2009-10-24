@@ -17,12 +17,12 @@
 #define EVNTMUT (uint16_t) 0
 #define EVNTINF (uint16_t) 1
 #define EVNTREC (uint16_t) 2
-#define WEVNTMUT (uint16_t) 3
+#define WIMMSTIM (uint16_t) 3
 #define WEVNTINF (uint16_t) 4
 #define WEVNTREC (uint16_t) 5
 
 #define PRINTINFO 0
-#define PRINTINFO2 0
+#define PRINTINFO2 1
 
 /*Structures */
 
@@ -49,8 +49,9 @@ double a = 0.1;			//instantaneous rate of decay of sim_T with distance between n
 double total_rates = 0;		//sum of rate of all events possible at simulation time TIME 
 SEXP g;				//pointer to network object 
 int case_load = -1;		//counts the number of current infected hosts
-int adaptive_immunity_levels[MAXIMMUN]= {0};     //counts of specific immune responses to strains with different phylo_ids
+double adaptive_immunity_levels[MAXIMMUN]= {0};     //counts of specific immune responses to strains with different phylo_ids
 int next_phylo_id = 1;		//next strain phylogenetic id number, as opposed to the normal id that's based on distance
+double conv = 0.1;              //Conversion factor for the stimulation of immunity
 
 struct value *v, *found;
 struct hashtable *h;
@@ -82,6 +83,8 @@ int winfect (struct key *q, struct value *p);
 int wrecover (struct key *q, struct value *p);
 
 int wmutate (struct key *q, struct value *p);
+
+int wimmstim (struct key *q, struct value *p);
 
 void within_do_next_event (int make_time_series, double *distance, double *fitness);
 
@@ -1005,7 +1008,7 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   case_load = 0;
   for (i = 0; i < MAXIMMUN; i++)
     {
-      adaptive_immunity_levels[i]=0;
+      adaptive_immunity_levels[i]=1;
     }
   next_phylo_id = 1;
 
@@ -1131,12 +1134,19 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
     }
   if (hashtable_count(h))
     {
+      itr = hashtable_iterator(h);
+      do {
+          k = hashtable_iterator_key(itr);
+          Rprintf("fun: %d, ego: %d, altar %d, twoport: %d\n", 
+                  k->function_id, k->ego_id, k->altar_id, k->two_port);
+      } while (hashtable_iterator_advance(itr));
+
       hashtable_destroy (h, 1);
-      error("Items left in table at end of simulation\n");
+      error("Items with above keys left in table at end of simulation\n");
     }
   for (i = 0; i < next_phylo_id; i++)
     {
-      Rprintf("imm[%d] = %d, ", i, adaptive_immunity_levels[i]);
+      Rprintf("imm[%d] = %g, ", i, adaptive_immunity_levels[i]);
       Rprintf("\n");
     }
   /*Clear protection stack and return */
@@ -1197,9 +1207,10 @@ within_do_next_event (int make_time_series, double *distance, double *fitness)
 #endif
       winfect (k, v);
       break;
-    case EVNTMUT:
+    case WIMMSTIM:
 #if PRINTINFO2
-      Rprintf ("Mutation of strain in %d\n", k->ego_id);
+      Rprintf ("Stimulation of immunity by strain in %d\n", k->ego_id);
+      wimmstim(k, v);
 #endif
       break;
     case EVNTREC:
@@ -1285,7 +1296,38 @@ winfect (struct key *q, struct value *p)
   
   /*update case load counter */
   case_load++;
-  adaptive_immunity_levels[phylo_id]++;
+  
+  /*Add event of host stimulating immunity to the table */
+  k = (struct key *) malloc (sizeof (struct key));
+  if (NULL == k)
+    {
+      hashtable_destroy (h, 1);
+      error ("%s: %d: Ran out of memory allocating a key\n",
+	     __FILE__, __LINE__);
+    }
+  k->ego_id = altar_id;
+  k->altar_id = 0;
+  k->function_id = WIMMSTIM;
+  k->two_port = 0;
+
+  v = (struct value *) malloc (sizeof (struct value));
+  if (NULL == v)
+    {
+      hashtable_destroy (h, 1);
+      free (k);
+      error ("%s: %d: Ran out of memory allocating a key\n",
+	     __FILE__, __LINE__);
+    }
+  v->phylo_id = phylo_id;
+  v->rate = conv * adaptive_immunity_levels[phylo_id];
+  total_rates += v->rate;
+
+  if (!insert_some (h, k, v))
+    {
+      hashtable_destroy (h, 1);
+      free (k);
+      error ("%s:%d: Insertion into hash table failed\n", __FILE__, __LINE__);
+    }
 
   /*Add event of host recovering to the table */
   k = (struct key *) malloc (sizeof (struct key));
@@ -1486,6 +1528,154 @@ winfect (struct key *q, struct value *p)
 }
 
 int
+wimmstim (struct key *q, struct value *p)
+{
+  /* host EGO_ID is burst at time SIM_TIME, and stimulates adaptive immunity */
+
+  SEXP sim_time_p, status_p, vall, val, infected_status_p;
+  SEXP hood, infector_id_p, sus_status_p, rec_status_p;
+  SEXP strain_id_p;
+  int pc = 0, i, ego_nb_id, ego_id, phylo_id;
+  struct key *k;
+
+  ego_id = q->ego_id;
+  phylo_id = p->phylo_id;
+  Rprintf("%d, %g\n",phylo_id,  adaptive_immunity_levels[phylo_id]++);
+
+  /*Increase the immune stimulation rates with new level of immunity */
+
+
+
+  /*Add and update vertex attributes */
+  PROTECT (sim_time_p = allocVector (REALSXP, 1));
+  pc++;
+  PROTECT (infected_status_p = allocVector (STRSXP, 1));
+  pc++;
+  PROTECT (sus_status_p = allocVector (STRSXP, 1));
+  pc++;
+  PROTECT (rec_status_p = allocVector (STRSXP, 1));
+  pc++;
+  REAL (sim_time_p)[0] = sim_time;
+  SET_STRING_ELT (infected_status_p, 0, mkChar ("infectious"));
+  SET_STRING_ELT (sus_status_p, 0, mkChar ("susceptible"));
+  SET_STRING_ELT (rec_status_p, 0, mkChar ("recovered"));
+  g = netSetVertexAttrib (g, "time_recovered", sim_time_p, q->ego_id);
+  g = netSetVertexAttrib (g, "status", rec_status_p, q->ego_id);
+
+  /*update case load counter */
+  case_load--;
+
+  /*Remove event of the newly recovered host again recovering from the dl list */
+	  k = (struct key *) malloc (sizeof (struct key));
+	  if (NULL == k)
+	    {
+	      hashtable_destroy (h, 1);
+	      error ("%s: %d: Ran out of memory allocating a key\n",
+		     __FILE__, __LINE__);
+	    }
+	  k->ego_id = ego_id;
+	  k->altar_id = 0;
+	  k->function_id = EVNTREC;
+          k->two_port = 0;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+	      free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
+  
+  /*Remove event of the newly recovered host again stimulating immunity */
+	  k = (struct key *) malloc (sizeof (struct key));
+	  if (NULL == k)
+	    {
+	      hashtable_destroy (h, 1);
+	      error ("%s: %d: Ran out of memory allocating a key\n",
+		     __FILE__, __LINE__);
+	    }
+	  k->ego_id = ego_id;
+	  k->altar_id = 0;
+	  k->function_id = WIMMSTIM;
+          k->two_port = 0;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+	      free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
+
+  /* Remove event of newly recovered host infecting suceptible neighbors from pointer array and dl list */
+  PROTECT (hood = netGetNeighborhood (g, ego_id, "out", 1));
+  pc++;
+  PROTECT (val = getListElement (g, "val"));
+  pc++;				//get list of vertex attributes
+  PROTECT (strain_id_p =
+	   getListElement (VECTOR_ELT (val, ego_id - 1),
+			   "infection_history"));
+  pc++;
+  for (i = 0; i < length (hood); i++)
+    {
+      ego_nb_id = INTEGER (hood)[i];
+      PROTECT (vall =
+	       getListElement (VECTOR_ELT (val, ego_nb_id - 1), "status"));
+      pc++;
+      if (vecEq (vall, sus_status_p))
+	{
+	  k = (struct key *) malloc (sizeof (struct key));
+          if (NULL == k)
+            {
+              hashtable_destroy (h, 1);
+              error ("%s: %d: Ran out of memory allocating a key\n",
+                     __FILE__, __LINE__);
+            }
+	  k->ego_id = ego_id;
+	  k->altar_id = ego_nb_id;
+	  k->function_id = EVNTINF;
+          k->two_port = 0;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+              free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
+	  
+          k = (struct key *) malloc (sizeof (struct key));
+          if (NULL == k)
+            {
+              hashtable_destroy (h, 1);
+              error ("%s: %d: Ran out of memory allocating a key\n",
+                     __FILE__, __LINE__);
+            }
+	  k->ego_id = ego_id;
+	  k->altar_id = ego_nb_id;
+	  k->function_id = EVNTINF;
+          k->two_port = 1;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+              free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
+	}
+
+    }
+  UNPROTECT (pc);
+  return (0);
+}
+
+
+int
 wrecover (struct key *q, struct value *p)
 {
   /* host EGO_ID recovers at time SIM_TIME */
@@ -1516,6 +1706,28 @@ wrecover (struct key *q, struct value *p)
 
   /*update case load counter */
   case_load--;
+  
+  /*Remove event of the newly recovered host again stimulating immunity */
+	  k = (struct key *) malloc (sizeof (struct key));
+	  if (NULL == k)
+	    {
+	      hashtable_destroy (h, 1);
+	      error ("%s: %d: Ran out of memory allocating a key\n",
+		     __FILE__, __LINE__);
+	    }
+	  k->ego_id = ego_id;
+	  k->altar_id = 0;
+	  k->function_id = WIMMSTIM;
+          k->two_port = 0;
+	  if (NULL == (found = remove_some (h, k)))
+	    {
+	      hashtable_destroy (h, 1);
+	      free (k);
+	      error ("%s:%d: Key not found for removal\n",
+		     __FILE__, __LINE__);
+	    }
+          total_rates -= found->rate;
+          free (found);
 
   /*Remove event of the newly recovered host again recovering from the dl list */
 	  k = (struct key *) malloc (sizeof (struct key));

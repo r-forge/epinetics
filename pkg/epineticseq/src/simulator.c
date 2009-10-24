@@ -56,7 +56,6 @@ double conv = 0.1;              //Conversion factor for the stimulation of immun
 struct value *v, *found;
 struct hashtable *h;
 struct hashtable_itr *itr;
-
 /*Function prototypes */
 
 SEXP epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
@@ -998,6 +997,7 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   int num_nodes, step, max, pc = 0, i;
   double tolerance = 0.001, rand;
   double *distance, *fitness;
+  SEXP imm_levels_p;
 
   /* reset global variables for secondary runs */
   struct event *start = NULL;	// Pointer to first element in doubly-linked list
@@ -1006,6 +1006,7 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
   a = 0;			//instantaneous rate of decay of sim_T with distance between new and old strains
   total_rates = 0;		//sum of rate of all events possible at simulation time TIME 
   case_load = 0;
+
   for (i = 0; i < MAXIMMUN; i++)
     {
       adaptive_immunity_levels[i]=1;
@@ -1149,6 +1150,15 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
       Rprintf("imm[%d] = %g, ", i, adaptive_immunity_levels[i]);
       Rprintf("\n");
     }
+  
+  PROTECT (imm_levels_p = allocVector (REALSXP, next_phylo_id - 1));
+  pc++;
+  for (i = 1; i < next_phylo_id; i++)
+    {
+      REAL (imm_levels_p)[i-1] = adaptive_immunity_levels[i];
+    }
+  PROTECT (netSetNetAttrib (g, "imm_levels", imm_levels_p));
+  pc++;
   /*Clear protection stack and return */
   UNPROTECT (pc);
   return g;

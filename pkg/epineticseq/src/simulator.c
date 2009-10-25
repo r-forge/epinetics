@@ -22,7 +22,7 @@
 #define WEVNTREC (uint16_t) 5
 
 #define PRINTINFO 0
-#define PRINTINFO2 1
+#define PRINTINFO2 0
 
 /*Structures */
 
@@ -1173,11 +1173,6 @@ within_epiSimSSA_R (SEXP network, SEXP trans, SEXP infectious_period,
       hashtable_destroy (h, 1);
       error("Items with above keys left in table at end of simulation\n");
     }
-  for (i = 0; i < next_phylo_id; i++)
-    {
-      Rprintf("imm[%d] = %g, ", i, adaptive_immunity_levels[i]);
-      Rprintf("\n");
-    }
   
   PROTECT (imm_levels_p = allocVector (REALSXP, next_phylo_id - 1));
   pc++;
@@ -1248,8 +1243,8 @@ within_do_next_event (int make_time_series, double *distance, double *fitness)
     case WIMMSTIM:
 #if PRINTINFO2
       Rprintf ("Stimulation of immunity by strain in %d\n", k->ego_id);
-      wimmstim(k, v);
 #endif
+      wimmstim(k, v);
       break;
     case EVNTREC:
 #if PRINTINFO2
@@ -1358,7 +1353,6 @@ winfect (struct key *q, struct value *p)
     }
   v->phylo_id = phylo_id;
   v->rate = efficiency * adaptive_immunity_levels[phylo_id];
-  Rprintf("stim rate: %g \n", v->rate);
   total_rates += v->rate;
 
   if (!insert_some (h, k, v))
@@ -1580,7 +1574,7 @@ wimmstim (struct key *q, struct value *p)
   ego_id = q->ego_id;
   phylo_id = p->phylo_id;
   adaptive_immunity_levels[phylo_id] += conversion_factor;
-  Rprintf("adaptive_immunity_levels[%d] = %g\n", phylo_id, adaptive_immunity_levels[phylo_id]);
+/*  Rprintf("adaptive_immunity_levels[%d] = %g\n", phylo_id, adaptive_immunity_levels[phylo_id]);*/
 
   /*Increase the immune stimulation rates with new level of immunity */
   n = netNetSize(g);
